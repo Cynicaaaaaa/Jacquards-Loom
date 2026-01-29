@@ -957,6 +957,157 @@ inline SaveTradeState saveTradeState;
 //----------------------------------------------------------------------------------
 //----------------------------------------------------------------------------------
 
+class Render {
+  public:
+    enum class Align { LEFT, CENTER, RIGHT };
+
+    struct Line {
+        std::string text;
+        Align alignment;
+    };
+
+    // NEW: buffer that stores lines in order
+    void pushLine(const std::string &txt, Align a = Align::LEFT) { bufferedLines.push_back({txt, a}); }
+
+    // NEW: move buffered lines into a column
+    void flushToColumn(std::vector<Line> &column) {
+        column.insert(column.end(), bufferedLines.begin(), bufferedLines.end());
+        bufferedLines.clear();
+    }
+
+    std::string printColumns(const std::vector<std::vector<Line>> &columns, int colWidth = 0, int spacing = 0, int padding = 0) const {
+        std::ostringstream oss;
+
+        int consoleWidth = functions.getConsoleWidth();
+        int numCols = columns.size();
+
+        int totalWidth = numCols * colWidth + (numCols - 1) * spacing + padding * 2;
+        int leftMargin = std::max(0, (consoleWidth - totalWidth) / 2);
+        std::string leftPad(leftMargin, ' ');
+
+        // WRAPPING
+        std::vector<std::vector<std::string>> wrappedText(columns.size());
+        std::vector<std::vector<Align>> wrappedAlign(columns.size());
+
+        for (size_t c = 0; c < columns.size(); ++c) {
+            for (const auto &ln : columns[c]) {
+                // Empty line
+                if (ln.text.find_first_not_of(" \t\r\n") == std::string::npos) {
+                    wrappedText[c].push_back("");
+                    wrappedAlign[c].push_back(ln.alignment);
+                    continue;
+                }
+
+                // Fits in one line
+                if (ln.text.size() <= (size_t)colWidth) {
+                    wrappedText[c].push_back(ln.text);
+                    wrappedAlign[c].push_back(ln.alignment);
+                    continue;
+                }
+
+                // Wrap long text
+                std::istringstream iss(ln.text);
+                std::string word, current;
+
+                while (iss >> word) {
+                    if (current.empty()) {
+                        current = word;
+                    } else if (current.size() + 1 + word.size() <= (size_t)colWidth) {
+                        current += " " + word;
+                    } else {
+                        wrappedText[c].push_back(current);
+                        wrappedAlign[c].push_back(ln.alignment);
+                        current = word;
+                    }
+                }
+
+                if (!current.empty()) {
+                    wrappedText[c].push_back(current);
+                    wrappedAlign[c].push_back(ln.alignment);
+                }
+            }
+        }
+
+        // Find max height
+        size_t maxLines = 0;
+        for (auto &col : wrappedText)
+            maxLines = std::max(maxLines, col.size());
+
+        // Print
+        for (size_t i = 0; i < maxLines; i++) {
+            oss << leftPad;
+            for (size_t c = 0; c < wrappedText.size(); c++) {
+                std::string text = "";
+                Align a = Align::LEFT;
+                if (i < wrappedText[c].size()) {
+                    text = wrappedText[c][i];
+                    a = wrappedAlign[c][i];
+                }
+                oss << alignFragment(text, a, colWidth);
+                if (c < wrappedText.size() - 1)
+                    oss << std::string(spacing, ' ');
+            }
+            oss << "\n";
+        }
+
+        return oss.str();
+    }
+
+    std::string printHeaderColumns(const std::vector<std::vector<Line>> &columns) const { return printColumns(columns, 82, 0, 0); }
+    std::string printMenuColumns(const std::vector<std::vector<Line>> &columns) const { return printColumns(columns, 41, 0, 0); }
+    std::string printBodyColumns(const std::vector<std::vector<Line>> &columns) const { return printColumns(columns, 80, 2, 0); }
+    std::string printIndicatorColumns(const std::vector<std::vector<Line>> &columns) const { return printColumns(columns, 30, 2, 0); }
+    std::string printFooterColumns(const std::vector<std::vector<Line>> &columns) const { return printColumns(columns, 82, 0, 0); }
+    std::string printCalendar(const std::vector<std::vector<Line>> &columns) const { return printColumns(columns, 246, 0, 0); }
+
+    void addEmptyLines(std::vector<Line> &col, int n) {
+        for (int i = 0; i < n; ++i) {
+            col.push_back({"", Align::CENTER});
+        }
+    }
+
+  private:
+    std::vector<Line> bufferedLines;
+
+    // align one wrapped fragment to EXACT width
+    std::string alignFragment(const std::string &txt, Align a, int width) const {
+        int len = txt.size();
+        if (len >= width)
+            return txt.substr(0, width);
+
+        int space = width - len;
+
+        switch (a) {
+        case Align::LEFT:
+            return txt + std::string(space, ' ');
+        case Align::RIGHT:
+            return std::string(space, ' ') + txt;
+        case Align::CENTER: {
+            int left = space / 2;
+            int right = space - left;
+            return std::string(left, ' ') + txt + std::string(right, ' ');
+        }
+        }
+        return txt; // fallback
+    }
+};
+
+using Line = Render::Line;
+using Align = Render::Align;
+
+// Persistent shared columns — used by ALL classes
+std::vector<Line> bodyCol1;
+std::vector<Line> bodyCol2;
+std::vector<Line> bodyCol3;
+
+std::vector<Line> col1;
+std::vector<Line> col2;
+std::vector<Line> col3;
+
+//----------------------------------------------------------------------------------
+//----------------------------------------------------------------------------------
+//----------------------------------------------------------------------------------
+
 class Functions {
   public:
     void clearConsole() {
@@ -1291,175 +1442,50 @@ class Functions {
         std::cout << "] " << std::setw(3) << static_cast<int>(progress * 100) << "%";
         std::cout.flush(); // Force immediate output
     }
-};
 
-// Global Instance
-inline Functions functions;
+    std::string makeProgressBar(int current, int total, int width = 50) const {
+        double progress = static_cast<double>(current) / total;
+        int filled = static_cast<int>(std::round(progress * width));
 
-//----------------------------------------------------------------------------------
-//----------------------------------------------------------------------------------
-//----------------------------------------------------------------------------------
-
-class Render {
-  public:
-    enum class Align { LEFT, CENTER, RIGHT };
-
-    struct Line {
-        std::string text;
-        Align alignment;
-    };
-
-    // NEW: buffer that stores lines in order
-    void pushLine(const std::string &txt, Align a = Align::LEFT) { bufferedLines.push_back({txt, a}); }
-
-    // NEW: move buffered lines into a column
-    void flushToColumn(std::vector<Line> &column) {
-        column.insert(column.end(), bufferedLines.begin(), bufferedLines.end());
-        bufferedLines.clear();
-    }
-
-    std::string printColumns(const std::vector<std::vector<Line>> &columns, int colWidth = 0, int spacing = 0, int padding = 0) const {
         std::ostringstream oss;
-
-        int consoleWidth = functions.getConsoleWidth();
-        int numCols = columns.size();
-
-        int totalWidth = numCols * colWidth + (numCols - 1) * spacing + padding * 2;
-        int leftMargin = std::max(0, (consoleWidth - totalWidth) / 2);
-        std::string leftPad(leftMargin, ' ');
-
-        // WRAPPING
-        std::vector<std::vector<std::string>> wrappedText(columns.size());
-        std::vector<std::vector<Align>> wrappedAlign(columns.size());
-
-        for (size_t c = 0; c < columns.size(); ++c) {
-            for (const auto &ln : columns[c]) {
-                // Empty line
-                if (ln.text.find_first_not_of(" \t\r\n") == std::string::npos) {
-                    wrappedText[c].push_back("");
-                    wrappedAlign[c].push_back(ln.alignment);
-                    continue;
-                }
-
-                // Fits in one line
-                if (ln.text.size() <= (size_t)colWidth) {
-                    wrappedText[c].push_back(ln.text);
-                    wrappedAlign[c].push_back(ln.alignment);
-                    continue;
-                }
-
-                // Wrap long text
-                std::istringstream iss(ln.text);
-                std::string word, current;
-
-                while (iss >> word) {
-                    if (current.empty()) {
-                        current = word;
-                    } else if (current.size() + 1 + word.size() <= (size_t)colWidth) {
-                        current += " " + word;
-                    } else {
-                        wrappedText[c].push_back(current);
-                        wrappedAlign[c].push_back(ln.alignment);
-                        current = word;
-                    }
-                }
-
-                if (!current.empty()) {
-                    wrappedText[c].push_back(current);
-                    wrappedAlign[c].push_back(ln.alignment);
-                }
-            }
-        }
-
-        // Find max height
-        size_t maxLines = 0;
-        for (auto &col : wrappedText)
-            maxLines = std::max(maxLines, col.size());
-
-        // Print
-        for (size_t i = 0; i < maxLines; i++) {
-            oss << leftPad;
-            for (size_t c = 0; c < wrappedText.size(); c++) {
-                std::string text = "";
-                Align a = Align::LEFT;
-                if (i < wrappedText[c].size()) {
-                    text = wrappedText[c][i];
-                    a = wrappedAlign[c][i];
-                }
-                oss << alignFragment(text, a, colWidth);
-                if (c < wrappedText.size() - 1)
-                    oss << std::string(spacing, ' ');
-            }
-            oss << "\n";
-        }
+        oss << "[";
+        for (int i = 0; i < filled; ++i)
+            oss << "#";
+        for (int i = filled; i < width; ++i)
+            oss << " ";
+        oss << "] " << std::setw(3) << int(progress * 100) << "%";
 
         return oss.str();
     }
 
-    std::string printHeaderColumns(const std::vector<std::vector<Line>> &columns) const { return printColumns(columns, 82, 0, 0); }
-    std::string printMenuColumns(const std::vector<std::vector<Line>> &columns) const { return printColumns(columns, 41, 0, 0); }
-    std::string printBodyColumns(const std::vector<std::vector<Line>> &columns) const { return printColumns(columns, 80, 2, 0); }
-    std::string printIndicatorColumns(const std::vector<std::vector<Line>> &columns) const { return printColumns(columns, 30, 2, 0); }
-    std::string printFooterColumns(const std::vector<std::vector<Line>> &columns) const { return printColumns(columns, 82, 0, 0); }
-    std::string printCalendar(const std::vector<std::vector<Line>> &columns) const { return printColumns(columns, 246, 0, 0); }
-
-    void addEmptyLines(std::vector<Line> &col, int n) {
-        for (int i = 0; i < n; ++i) {
-            col.push_back({"", Align::CENTER});
-        }
+    void updateProgress(int current, int total) {
+        col2.clear(); // overwrite previous bar
+        col2.push_back({makeProgressBar(current, total), Align::CENTER});
+        print();
     }
 
-  private:
-    std::vector<Line> bufferedLines;
+    void clearBodyColumns() {
+        bodyCol1.clear();
+        bodyCol2.clear();
+        bodyCol3.clear();
+        functions.clearConsole();
+    }
 
-    // align one wrapped fragment to EXACT width
-    std::string alignFragment(const std::string &txt, Align a, int width) const {
-        int len = txt.size();
-        if (len >= width)
-            return txt.substr(0, width);
+    void clearColumns() {
+        col1.clear();
+        col2.clear();
+        col3.clear();
+        functions.clearConsole();
+    }
 
-        int space = width - len;
-
-        switch (a) {
-        case Align::LEFT:
-            return txt + std::string(space, ' ');
-        case Align::RIGHT:
-            return std::string(space, ' ') + txt;
-        case Align::CENTER: {
-            int left = space / 2;
-            int right = space - left;
-            return std::string(left, ' ') + txt + std::string(right, ' ');
-        }
-        }
-        return txt; // fallback
+    void print() {
+        std::vector<std::vector<Line>> columns = {col1, col2, col3};
+        std::cout << render.printColumns(columns, 80, 4);
     }
 };
 
-using Line = Render::Line;
-using Align = Render::Align;
-
-// Persistent shared columns — used by ALL classes
-std::vector<Line> bodyCol1;
-std::vector<Line> bodyCol2;
-std::vector<Line> bodyCol3;
-
-std::vector<Line> col1;
-std::vector<Line> col2;
-std::vector<Line> col3;
-
-void clearBodyColumns() {
-    bodyCol1.clear();
-    bodyCol2.clear();
-    bodyCol3.clear();
-    functions.clearConsole();
-}
-
-void clearColumns() {
-    col1.clear();
-    col2.clear();
-    col3.clear();
-    functions.clearConsole();
-}
+// Global Instance
+inline Functions functions;
 
 //----------------------------------------------------------------------------------
 //----------------------------------------------------------------------------------
@@ -2062,7 +2088,7 @@ class KeyDerivation {
         std::string T = U;
 
         // Show initial progress
-        functions.printProgressBar(0, ITERATIONS);
+        functions.updateProgress(0, ITERATIONS);
 
         for (uint32_t i = 1; i < ITERATIONS; ++i) {
             U = HMAC::compute(password, U);
@@ -2070,7 +2096,7 @@ class KeyDerivation {
 
             // Only update progress bar every 1000 iterations for performance
             if (i % 1000 == 0 || i == ITERATIONS - 1) {
-                functions.printProgressBar(i, ITERATIONS);
+                functions.updateProgress(i, ITERATIONS);
             }
         }
 
@@ -2092,7 +2118,7 @@ class KeyDerivation {
         std::string T = U;
 
         // Show initial progress
-        functions.printProgressBar(0, ITERATIONS);
+        functions.updateProgress(0, ITERATIONS);
 
         for (uint32_t i = 1; i < ITERATIONS; ++i) {
             U = HMAC::compute(password, U);
@@ -2100,7 +2126,7 @@ class KeyDerivation {
 
             // Only update progress bar every 1000 iterations for performance
             if (i % 1000 == 0 || i == ITERATIONS - 1) {
-                functions.printProgressBar(i, ITERATIONS);
+                functions.updateProgress(i, ITERATIONS);
             }
         }
 
