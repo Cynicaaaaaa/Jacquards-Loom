@@ -1277,6 +1277,20 @@ class Functions {
         ss << std::put_time(std::gmtime(&tt), "%Y-%m-%d %H:%M:%S");
         return ss.str();
     }
+
+    // Progress bar (simple)
+    void printProgressBar(int current, int total, int width = 50) const {
+        double progress = static_cast<double>(current) / static_cast<double>(total);
+        int filled = static_cast<int>(std::round(progress * width));
+
+        std::cout << "\r[";
+        for (int i = 0; i < filled; ++i)
+            std::cout << "#";
+        for (int i = filled; i < width; ++i)
+            std::cout << " ";
+        std::cout << "] " << std::setw(3) << static_cast<int>(progress * 100) << "%";
+        std::cout.flush(); // Force immediate output
+    }
 };
 
 // Global Instance
@@ -2048,7 +2062,7 @@ class KeyDerivation {
         std::string T = U;
 
         // Show initial progress
-        printProgressBar(0, ITERATIONS);
+        functions.printProgressBar(0, ITERATIONS);
 
         for (uint32_t i = 1; i < ITERATIONS; ++i) {
             U = HMAC::compute(password, U);
@@ -2056,7 +2070,7 @@ class KeyDerivation {
 
             // Only update progress bar every 1000 iterations for performance
             if (i % 1000 == 0 || i == ITERATIONS - 1) {
-                printProgressBar(i, ITERATIONS);
+                functions.printProgressBar(i, ITERATIONS);
             }
         }
 
@@ -2065,20 +2079,6 @@ class KeyDerivation {
 
         out.key = T;
         return out;
-    }
-
-    // Progress bar (simple)
-    void printProgressBar(int current, int total, int width = 50) const {
-        double progress = static_cast<double>(current) / static_cast<double>(total);
-        int filled = static_cast<int>(std::round(progress * width));
-
-        std::cout << "\r[";
-        for (int i = 0; i < filled; ++i)
-            std::cout << "#";
-        for (int i = filled; i < width; ++i)
-            std::cout << " ";
-        std::cout << "] " << std::setw(3) << static_cast<int>(progress * 100) << "%";
-        std::cout.flush(); // Force immediate output
     }
 
     // Derive key from a given password string (with existing salt)
@@ -2091,9 +2091,17 @@ class KeyDerivation {
         std::string U = HMAC::compute(password, salt_str);
         std::string T = U;
 
+        // Show initial progress
+        functions.printProgressBar(0, ITERATIONS);
+
         for (uint32_t i = 1; i < ITERATIONS; ++i) {
             U = HMAC::compute(password, U);
             xorInPlace(T, U);
+
+            // Only update progress bar every 1000 iterations for performance
+            if (i % 1000 == 0 || i == ITERATIONS - 1) {
+                functions.printProgressBar(i, ITERATIONS);
+            }
         }
 
         out.key = T;
@@ -6376,7 +6384,7 @@ class ReinforcementLearning {
             saveQTable(fileSystem.file_7); // Use FileSystem's qtable path
 
             // Print progress and ETA
-            printProgressBar(episode, numEpisodes);
+            functions.printProgressBar(episode, numEpisodes);
 
             if (episode % 1 == 0 || episode == numEpisodes) {
                 // std::cout << " Episode: " << episode << " ETA: " << etaMinutes << "m " << etaSeconds << "s"
@@ -6565,18 +6573,6 @@ class ReinforcementLearning {
         default:
             return "Unknown";
         }
-    }
-
-    // Progress bar (simple)
-    void printProgressBar(int current, int total, int width = 50) const {
-        double progress = static_cast<double>(current) / static_cast<double>(total);
-        int filled = static_cast<int>(std::round(progress * width));
-        std::cout << "\r[";
-        for (int i = 0; i < filled; ++i)
-            std::cout << "#";
-        for (int i = filled; i < width; ++i)
-            std::cout << " ";
-        std::cout << "] " << std::setw(3) << static_cast<int>(progress * 100) << "%";
     }
 
     // Helper: parse CSV line "s,a,q" robustly
